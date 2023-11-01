@@ -1,0 +1,28 @@
+version: "3"
+
+services:
+  snipe-it:
+    env_file: .env
+    image: linuxserver/snipe-it:6.2.3
+    ports:
+      - "8080:80"
+    restart: always
+    networks:
+      - snipe-network
+  mysql:
+    env_file: .env
+    image: mysql:8.2.0
+    volumes:
+      - mariadb:/var/lib/mysql
+      - ./db.dump:/db.dump:ro
+    restart: always
+    networks:
+      - snipe-network
+    
+
+networks:
+  snipe-network:
+    driver: bridge
+
+volumes:
+  mariadb:
