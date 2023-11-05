@@ -16,7 +16,7 @@ setup-db:
 	docker-compose stop snipe-it
 	docker-compose exec mysql bash -c "mysql -u root -pYOUR_SUPER_SECRET_PASSWORD -e 'DROP DATABASE IF EXISTS snipeit;'"
 	docker-compose exec mysql bash -c "mysql -u root -pYOUR_SUPER_SECRET_PASSWORD -e 'CREATE DATABASE snipeit;'"
-	docker-compose exec mysql bash -c "mysql -u root -pYOUR_SUPER_SECRET_PASSWORD snipeit < /db.dump"
+	docker-compose exec mysql bash -c "mysql -u root -pYOUR_SUPER_SECRET_PASSWORD < /db.dump"
 	docker-compose start snipe-it
 
 # warning! includes volumes

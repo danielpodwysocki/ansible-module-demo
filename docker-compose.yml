@@ -9,6 +9,9 @@ services:
     restart: always
     networks:
       - snipe-network
+    volumes:
+      - ./.snipe_boostrap/oauth-public.key:/config/storage/oauth-public.key:ro
+      - ./.snipe_boostrap/oauth-private.key:/config/storage/oauth-private.key:ro
   mysql:
     env_file: .env
     image: mysql:8.2.0

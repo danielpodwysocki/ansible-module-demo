@@ -35,15 +35,17 @@ options:
         required: true
         type: int
         default: 2
-    model_id:
+    model_name:
         description: >
-          The model ID to use for the entry. A fresh instance
+          The name of the model to use for the entry. A fresh instance
           doesn't have any models defined, so you'll need to create one first.
         required: true
         type: int
-              
-    
-      
+    state:
+        description: "present" or "absent" - "present" ensures the entry exists, "absent" ensures it doesn't
+        required: false
+        type: str
+        default: present
 
 author:
     - Daniel Podwysocki (@danielpodwysocki)
@@ -57,6 +59,7 @@ EXAMPLES = r"""
        asset_tag: example_asset001
        snipe_url: http://localhost:8080/
        api_key: 1234567890abcdef
+       model_name: server
 """
 
 RETURN = r"""
@@ -70,32 +73,8 @@ import json
 
 import requests
 
-from typing import Union
 from ansible.module_utils.basic import AnsibleModule
-
-
-def get_entry(
-    snipe_url: str, api_key: str, asset_tag: str, module: AnsibleModule
-) -> Union[dict, None]:
-    """Return an existing entry from SnipeIT or None if it doesn't exist
-
-    :param snipe_url:
-    :param api_key:
-    :param asset_tag:
-    :return:
-    """
-    response = requests.get(
-        f"{snipe_url.rstrip('/')}/api/v1/hardware/bytag/{asset_tag}",
-        headers={"Authorization": f"Bearer {api_key}"},
-    )
-    data = json.loads(response.text)
-    if "asset_tag" in data.keys():
-        return data
-    if data["status"] == "error" and data["messages"] == "Asset does not exist.":
-        return None
-    elif data["status"] == "error":
-        module.fail_json(msg=f"Error retrieving entry: {data['messages']}")
-    module.fail_json("Unknown response from SnipeIT")
+from ansible.module_utils.snipeit import get_model, get_entry
 
 
 def create_entry(
@@ -139,8 +118,38 @@ def create_entry(
         module.fail_json(msg=f"Error creating entry: {data['messages']}")
     return True
 
+def delete_entry(
+    snipe_url: str,
+    api_key: str,
+    asset_tag: str,
+    module: AnsibleModule,
+    dry_run: bool,
+) -> bool:
+    """Delete an entry in SnipeIT. Return False if it doesn't exist
 
-def update_model(
+    :param snipe_url: The URL of the SnipeIT instance
+    :param api_key: The API key to use to authenticate to SnipeIT
+    :param asset_tag: The asset tag to use for the entry
+    :param module:  The AnsibleModule object
+    :param dry_run: If True, don't actually delete the entry.
+    :return: True if the entry was deleted, False if it doesn't exist.
+    In dry-run mode, return True if it would have been deleted and False otherwise.
+    """
+    entry = get_entry(snipe_url, api_key, asset_tag, module)
+    if not entry:
+        return False
+    if entry and dry_run:
+        return True
+    response = requests.delete(
+        f"{snipe_url.rstrip('/')}/api/v1/hardware/{entry['id']}",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    data = json.loads(response.text)
+    if data["status"] == "error":
+        module.fail_json(msg=f"Error deleting entry: {data['messages']}")
+    return True
+
+def update_entry_model(
     snipe_url: str,
     api_key: str,
     asset_tag: str,
@@ -148,7 +157,8 @@ def update_model(
     module: AnsibleModule,
     dry_run: bool,
 ):
-    """Update the model of an existing entry in SnipeIT. Return False if it is already correct
+    """Update the model of an existing entry in SnipeIT.
+    Return False if it is already correct
 
     :param snipe_url: The URL of the SnipeIT instance
     :param api_key: The API key to use to authenticate to SnipeIT
@@ -174,45 +184,132 @@ def update_model(
     data = json.loads(response.text)
     if data["status"] == "error":
         module.fail_json(msg=f"Error updating entry: {data['messages']}")
+    return True
 
+
+def update_entry_status_label(
+    snipe_url: str,
+    api_key: str,
+    asset_tag: str,
+    status_id: int,
+    module: AnsibleModule,
+    dry_run: bool,
+):
+    """Update the status of an existing entry in SnipeIT. Return False if it is already correct
+
+    :param snipe_url: The URL of the SnipeIT instance
+    :param api_key: The API key to use to authenticate to SnipeIT
+    :param asset_tag: The asset tag to use for the entry
+    :param status_id: The status ID to use for the entry
+    :param module: The AnsibleModule object
+    :param dry_run: When True, don't actually update the entry
+    :return: True if the entry was updated, False if it already exists. In dry-run mode, return True if it would have been updated and False otherwise.
+    """
+    entry = get_entry(snipe_url, api_key, asset_tag, module)
+    if entry["status_label"]["id"] == status_id:
+        return False
+    if entry["status_label"]["id"] != status_id and dry_run:
+        return True
+    payload = {
+        "status_id": status_id,
+    }
+    response = requests.patch(
+        f"{snipe_url.rstrip('/')}/api/v1/hardware/{entry['id']}",
+        json=payload,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    data = json.loads(response.text)
+    if data["status"] == "error":
+        module.fail_json(msg=f"Error updating entry: {data['messages']}")
+    return True
+
+
+def verify_params(module: AnsibleModule) -> None:
+    """  Any arg verification that Ansible cannot handle itself
+    is done here.  This is a good place to check for arguments that are mutually exclusive, arguments that are required
+    only in specific situations, etc. Executes module.fail_json() if verification fails.
+
+    :param module: The AnsibleModule object
+    :return: None
+    """
+    if module.params["state"] == "present" and not module.params["model_name"]:
+        module.fail_json(msg="model_name is required when state is present")
 
 def run_module():
     # define available arguments/parameters a user can pass to the module
-    module_args = dict(
-        asset_tag=dict(type="str", required=True),
-        snipe_url=dict(type="str", required=True),
-        api_key=dict(type="str", required=True, no_log=True),
-        status_id=dict(type="int", required=False, default=1),
-        model_id=dict(type="int", required=True),
-    )
+    module_args = {
+        "asset_tag": {"type": "str", "required": True},
+        "snipe_url": {"type": "str", "required": True},
+        "api_key": {"type": "str", "required": True, "no_log": True},
+        "status_id": {"type": "int", "required": False, "default": 2},
+        "model_name": {"type": "str", "required": False}, # required on create/update, enforced by verify_params
+        "state": {"type": "str", "required": False, "default": "present", "choices": ["present", "absent"]},
+    }
 
-    result = dict(
-        changed=False,
-    )
+    result = {"changed": False}
 
     # the AnsibleModule object will be our abstraction working with Ansible
     # this includes instantiation, a couple of common attr would be the
     # args/params passed to the execution, as well as if the module
     # supports check mode
-    module = AnsibleModule(argument_spec=module_args, supports_check_mode=False)
+    module = AnsibleModule(argument_spec=module_args, supports_check_mode=True)
+    verify_params(module)
 
-    changed = False
+    if module.params["state"] == "absent":
+        changed = delete_entry(
+            module.params["snipe_url"],
+            module.params["api_key"],
+            module.params["asset_tag"],
+            module,
+            module.check_mode,
+        )
+        result["changed"] = changed
+        module.exit_json(**result)
+
+    dry_run = module.check_mode
+    model = get_model(
+        module.params["snipe_url"],
+        module.params["api_key"],
+        module.params["model_name"],
+        module,
+    )
+    if not model:
+        module.fail_json(msg=f"Model {module.params['model_name']} does not exist")
+
+    changed = False  # noqa: F841
     changed = create_entry(
         module.params["snipe_url"],
         module.params["api_key"],
         module.params["asset_tag"],
         module.params["status_id"],
-        module.params["model_id"],
+        model["id"],
         module,
-        dry_run=False,
+        dry_run,
     )
-    changed = changed or update_model(
-        module.params["snipe_url"],
-        module.params["api_key"],
-        module.params["asset_tag"],
-        module.params["model_id"],
-        module,
-        dry_run=False,
+    # order matters - if you use this pattern, always put changed last
+    # Otherwise the interpreter will skip executing your function!
+    changed = (
+        update_entry_model(
+            module.params["snipe_url"],
+            module.params["api_key"],
+            module.params["asset_tag"],
+            model["id"],
+            module,
+            dry_run,
+        )
+        or changed
+    )
+
+    changed = (
+        update_entry_status_label(
+            module.params["snipe_url"],
+            module.params["api_key"],
+            module.params["asset_tag"],
+            module.params["status_id"],
+            module,
+            dry_run,
+        )
+        or changed
     )
 
     result["changed"] = changed
