@@ -22,7 +22,12 @@ That makes it aware it can find modules in this directory.
 # available to you
 source venv/bin/activate
 export ANSIBLE_LIBRARY=$(pwd)/plugins/modules
-ansible-playbook dev_playbooks/create_entry.yml
+# this triggers the snipeit_category module, found in
+# plugins/modules
+ansible-playbook dev_playbooks/create_category.yml
+ansible-playbook dev_playbooks/create_model.yml # needs the category
+ansible-playbook dev_playbooks/create_entry.yml # needs the model
+ansible-playbook dev_playbooks/delete_entry.yml # needs the model
 
 ```
 
@@ -97,6 +102,8 @@ make venv
 ```
 
 ## Extra information
+
+Development docs from ansible can be found here: https://docs.ansible.com/ansible/latest/dev_guide/developing_modules_general.html
 
 ### Shipping modules
 
